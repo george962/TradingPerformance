@@ -1,0 +1,15 @@
+# Personal data — never commit
+data.json
+data.json.tmp
+*.csv
+!tests/synthetic*.csv
+portfolio-seed.json
+
+# Runtime download cache (rebuilt by the server on first use)
+outlook-data/
+
+# OS / editor / Python
+.DS_Store
+__pycache__/
+*.pyc
+*.zip
