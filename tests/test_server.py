@@ -1,6 +1,7 @@
-"""Server fetch tests (v1.14) with a fake Yahoo response — no network.
+"""Server fetch tests with a fake Yahoo response — no network.
 Usage: python3 tests/test_server.py   (from the TradingPerformance folder)"""
-import io, json, os, sys, time
+import io, json, os, sys, tempfile, time
+os.environ["TP_DATA_DIR"] = tempfile.mkdtemp()  # never touch your real data
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 import server
 

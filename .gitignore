@@ -13,3 +13,4 @@ outlook-data/
 __pycache__/
 *.pyc
 *.zip
+tools/regime-data/

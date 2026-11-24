@@ -497,3 +497,10 @@ body.private .priv-btn { opacity: 1; color: var(--orange); }
 .drivers { margin-top: 14px; border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; background: #fff; }
 .drv { display: flex; justify-content: space-between; gap: 12px; padding: 5px 0; font: 500 14px var(--sans); border-top: 1px solid #f3e7d0; }
 .drv:first-of-type { border-top: 0; }
+
+/* Sample-data banner and glossary */
+.sample-banner { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; background: #fff5e6; border: 1px solid #f1d39c; color: #7a4f00; border-radius: 12px; padding: 10px 14px; font-size: 14px; margin-bottom: 16px; }
+.sample-banner .btn { margin-left: auto; }
+.glossary { margin-top: 14px; }
+.glossary .prose p { margin: 0 0 8px; font-size: 14px; }
+.welcome .more { text-align: left; }

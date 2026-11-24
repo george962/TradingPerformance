@@ -15,7 +15,9 @@ function check(name, cond, detail) {
   else { failed++; console.log('FAIL  ' + name + (detail !== undefined ? ' — ' + detail : '')); }
 }
 const dir = path.join(__dirname, '..');
-const sp500 = JSON.parse(fs.readFileSync(path.join(dir, 'sp500.json'), 'utf8'));
+// Made-up S&P 500 line from the sample set (no real index data ships with the app).
+const sample = JSON.parse(fs.readFileSync(path.join(dir, 'sample', 'sample-data.json'), 'utf8'));
+const sp500 = sample.indexExtra;
 // Made-up monthly-returns sheet (the optional Portfolio import).
 const seed = Object.assign(P.parseSheet(fs.readFileSync(path.join(__dirname, 'synthetic-sheet.csv'), 'utf8')), { source: 'synthetic-sheet.csv' });
 const csvText = fs.readFileSync(path.join(__dirname, 'synthetic.csv'), 'utf8');
@@ -147,6 +149,46 @@ const dv = App.buildData(state, result);
 check('drop zone, files, prices, sheet, account check', dv.includes('id="dropZone"') && dv.includes('synthetic.csv') && dv.includes('Prices') && dv.includes('Portfolio sheet') && dv.includes('Rebuilt account value'));
 check('how it is calculated + start over', dv.includes('How this is calculated') && dv.includes('data-act="startover"'));
 check('welcome screen has a drop zone', App.buildWelcome().includes('id="dropZone"'));
+
+console.log('--- Sample data (Try sample data) ---');
+const sFiles = sample.files.map(f => E.parseFidelityCSV(f.csv, f.name));
+check('every sample file parses as a Fidelity export', sFiles.every(p => !p.error && p.rows.length > 0));
+let sTx = [];
+sFiles.forEach(p => { sTx = E.mergeTransactions(sTx, E.assignOccurrenceKeys(p.rows)).merged; });
+check('sample has a few years of activity in one account', sTx.length > 50 && new Set(sTx.map(E.accountOf)).size === 1 && E.accountOf(sTx[0]) === 'SAMPLE01');
+check('sample account reads as a Brokerage account', E.inferAccountType(sTx) === 'Brokerage');
+const sBench = E.buildBenchmark(sample.trHistory, sample.indexExtra);
+const sRes = E.compute(sTx, new E.IndexSeries(sBench.rows), sample.prices, { history: sample.history, indexIsTotalReturn: sBench.isTotalReturn });
+check('sample computes against a total-return line with no warnings', sBench.isTotalReturn && sRes.warnings.length === 0, sRes.warnings.join(' | '));
+check('sample cash matches its Cash Balance column every day', sRes.cashCheck.checked > 20 && sRes.cashCheck.matched === sRes.cashCheck.checked);
+check('sample has beats, lags and an in-line index fund', sRes.purchases.some(l => l.pp > 0.5) && sRes.purchases.some(l => l.pp < -0.5) && sRes.purchases.some(l => l.symbol === 'IDXF'));
+check('sample has several years for the Years page', Object.keys(sRes.cohorts).length >= 4);
+const sSheet = P.parseSheet(sample.sheet.csv);
+const sState = Object.assign({}, state, { transactions: sTx, portfolio: sSheet, accounts: sample.accounts, account: 'SAMPLE01' });
+const sList = App.pfAccounts(sState, { SAMPLE01: sRes });
+check('sample Portfolio picker: the Fidelity account plus a sheet-only 401k', sList.length === 2 && sList[0].key === 'fid:SAMPLE01' && sList[1].key === 'sheet:roth401k');
+check('sample pages render', App.buildOverview(sState, sRes).includes('Sample brokerage') || App.buildOverview(sState, sRes).includes('hero'));
+check('sample says it is made up', /made-up/i.test(sample.about) && sample.files.every(f => /sample data made up/i.test(f.csv)));
+const os = require('os'), cp = require('child_process');
+const regen = path.join(os.tmpdir(), 'tp-sample-' + process.pid + '.json');
+cp.execFileSync(process.execPath, [path.join(dir, 'tools', 'make-sample.js')], { env: Object.assign({}, process.env, { SAMPLE_OUT: regen }), stdio: 'ignore' });
+check('shipped sample matches tools/make-sample.js exactly', fs.readFileSync(regen, 'utf8') === fs.readFileSync(path.join(dir, 'sample', 'sample-data.json'), 'utf8'));
+fs.unlinkSync(regen);
+check('app loads the sample from the allowlisted path', appSrc.includes("fetch('sample/sample-data.json')") && fs.readFileSync(path.join(dir, 'server.py'), 'utf8').includes('"/sample/sample-data.json"'));
+check('sample mode never saves or refreshes', /function saveData\(\) \{\s*if \(state\.sample\) return/.test(appSrc) && /function refreshPrices\(showToast\) \{\s*if \(state\.sample\)/.test(appSrc));
+
+console.log('--- Welcome, terms, readable price errors ---');
+const wel = App.buildWelcome();
+check('welcome offers sample data', wel.includes('data-act="sample"') && wel.includes('Try sample data'));
+check('welcome explains which Fidelity export to use', wel.includes('Accounts → History') && wel.includes('History_for_Account_'));
+check('welcome says other brokers are not supported yet', wel.includes('Other brokers aren’t supported yet'));
+const welWait = App.buildWelcome({ transactions: [{}], priceErrors: { errors: { '^SPX': 'no internet connection, or the data source is unreachable' } } });
+check('files loaded but no prices yet: asks for a download and says why the last one failed', welWait.includes('data-act="refresh"') && welWait.includes('S&amp;P 500 (^SPX): no internet'));
+check('Overview explains its terms', ov.includes('What these terms mean') && ov.includes('Time-weighted return') && ov.includes('money in'));
+check('Data page shows price errors and labels the feed best-effort',
+  App.buildData(Object.assign({}, state, { priceErrors: { errors: { ABC: 'timed out' } } }), result).includes('Couldn’t fetch: ABC: timed out') && dv.includes('best-effort, may break'));
+check('no bundled S&P 500 file is fetched', !appSrc.includes('sp500.json') && !fs.existsSync(path.join(dir, 'sp500.json')));
+check('all API calls send JSON (the server refuses anything else)', !/fetch\('\/api\/(?!load-data)/.test(appSrc));
 
 console.log('--- Privacy mode ---');
 App.setPrivate(true);

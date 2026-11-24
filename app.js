@@ -1,4 +1,4 @@
-/* Trading Performance vs S&P 500 — app UI (v1.14).
+/* Trading Performance vs S&P 500 — app UI.
  * Hash-routed single-page app: Overview, Years, Purchases, Portfolio, Data.
  * View builders are pure (return HTML strings) so they can be tested in
  * Node; the browser part wires navigation, charts, the drawer, uploads.
@@ -140,6 +140,15 @@
     return { actualPct: result.actualPct, baselinePct: result.baselinePct, actualAnnPct: result.actualAnnPct,
       baselineAnnPct: result.baselineAnnPct, days: (Date.parse(result.endDate) - Date.parse(result.startDate)) / 864e5 };
   }
+  // Plain-English meanings of the terms used across the pages.
+  function glossary() {
+    return '<details class="more glossary"><summary>What these terms mean</summary><div class="more-body prose">' +
+      '<p><strong>Time-weighted return</strong>: your return with deposits and withdrawals taken out, so adding money never counts as a gain. It is the fair way to compare an account with an index.</p>' +
+      '<p><strong>Buy-and-hold S&amp;P 500</strong>: the same deposits, each put into the S&amp;P 500 (dividends reinvested) on the day it arrived.</p>' +
+      '<p><strong>pp</strong> (percentage points): the gap between two percentages. You +12%, S&amp;P +10% = +2 pp.</p>' +
+      '<p><strong>New money / money in</strong>: deposits, transfers and rollovers from outside the account. Dividends and interest are returns, not money in.</p>' +
+      '<p><strong>Beat / in line / lagged</strong>: more than 0.5 pp ahead of the index, within ±0.5 pp, or more than 0.5 pp behind.</p></div></details>';
+  }
   function buildOverview(state, result) {
     var divs = false; // dividends are shown on the Purchases page only
     var h = heroBlock(result.diffPp >= 0 ? 'You beat buy-and-hold by' : 'Buy-and-hold beat you by', result.diffPp,
@@ -150,7 +159,7 @@
       kpi('Buy-and-hold S&amp;P 500', result.baselineGain, 'signed', b(fmtPct(result.baselinePct)) + ' time-weighted') +
       kpi('Difference', result.diff, 'signed', 'on ' + b(fmtMoney(result.moneyIn)) + ' of new money') +
       kpi('Account value', result.accountValue, 'money', 'holdings ' + b(fmtMoney(result.holdingsValue)) + ' · cash ' + b(fmtMoney(result.cash))) +
-      '</div>';
+      '</div>' + glossary();
     h += '<section class="section card pad" style="margin-top:22px"><div class="section-head"><h2>Growth</h2>' +
       '<span class="hint" id="chartHint">your account vs. the same deposits in the S&amp;P 500</span><div class="right">' +
       (PRIVATE ? '<span class="chip">Amounts hidden</span>' : seg('ovChart', [{ v: 'dollars', l: 'Dollars' }, { v: 'growth', l: 'Growth of $1' }], state.ui.chart)) + '</div></div>' +
@@ -624,7 +633,7 @@
     return '<div class="card pad mood"><div class="eyebrow">Fear &amp; Greed (CNN)</div><div class="mood-label ' + (v < 45 ? 'neg' : v > 55 ? 'pos' : 'flat') + '">' + Math.round(v) + ' · ' + lab + '</div>' +
       '<div class="gauge fg"><span class="g-mark ' + (v < 45 ? 'neg' : v > 55 ? 'pos' : 'flat') + '" style="left:' + v + '%"></span></div><div class="g-scale"><span>Extreme fear</span><span>Neutral</span><span>Extreme greed</span></div>' +
       '<p class="mood-sub">' + (fg.previousWeek != null ? 'A week ago ' + Math.round(fg.previousWeek) : '') + (fg.previousMonth != null ? ' · a month ago ' + Math.round(fg.previousMonth) : '') +
-      '. Mood only: in backtests it didn’t improve forecasts.</p><div class="chart" id="fgChart" style="margin-top:8px"></div></div>';
+      '. Mood only: in backtests it didn’t improve forecasts. Unofficial CNN feed: best-effort, may break.</p><div class="chart" id="fgChart" style="margin-top:8px"></div></div>';
   }
   function buildTogether(state, result) {
     if (!result) return '';
@@ -744,7 +753,7 @@
     now = now || Date.now();
     var raw = state.news;
     var hold = result ? Object.keys(result.holdings || {}).sort() : [];
-    var head = '<div class="toolbar"><span class="muted" style="font-size:14px">' + (raw && raw.fetchedAt ? 'Headlines from the last 14 days · updated ' + ago(raw.fetchedAt, now) : 'Recent headlines for the stocks you hold and the market') +
+    var head = '<div class="toolbar"><span class="muted" style="font-size:14px">' + (state.sample ? 'Sample stocks are made up, so they have no headlines; market headlines are real. ' : '') + (raw && raw.fetchedAt ? 'Headlines from the last 14 days · updated ' + ago(raw.fetchedAt, now) : 'Recent headlines for the stocks you hold and the market') +
       '</span><button class="btn" data-act="news" type="button" style="margin-left:auto">' + icon('refresh') + '<span class="lbl">Refresh news</span></button></div>';
     var outlookHtml = buildOutlook(state) + buildModel(state);
     if (!raw || !raw.symbols) {
@@ -791,7 +800,7 @@
     h += '<section class="section card pad" style="margin-top:22px"><div class="section-head"><h2>Market headlines</h2><span class="hint">what’s moving the S&amp;P 500 this week</span></div>' +
       (mlist.length ? '<ul class="hls">' + mlist.slice(0, 10).map(function (it) { return headline(it, now); }).join('') + '</ul>' : '<p class="muted">No headlines.</p>') + '</section>';
     h += buildToneHistory(state);
-    h += '<p class="muted" style="font-size:13px">Tone is read from the words in each headline (e.g. “beats estimates”, “raises guidance”, “upgrade” vs. “misses”, “lawsuit”, “downgrade”), newer headlines counting more. It summarizes the news; it isn’t a forecast. Sources: Yahoo Finance and Google News.</p>';
+    h += '<p class="muted" style="font-size:13px">Tone is read from the words in each headline (e.g. “beats estimates”, “raises guidance”, “upgrade” vs. “misses”, “lawsuit”, “downgrade”), newer headlines counting more. It summarizes the news; it isn’t a forecast. Sources: Yahoo Finance and Google News, via unofficial feeds: best-effort, may break, for personal use.</p>';
     return h;
   }
 
@@ -824,6 +833,8 @@
       '<div class="stat-line"><span>Benchmark</span><span>' + (result && result.indexIsTotalReturn ? 'S&amp;P 500 total return' : 'S&amp;P 500 price index (refresh for total return)') + '</span></div>' +
       '<div class="stat-line"><span>Daily history</span><span>' + Object.keys(state.history || {}).length + ' symbols</span></div>' +
       '<div class="stat-line"><span>Last refreshed</span><span>' + esc(state.lastRefresh || 'never') + '</span></div>' +
+      (state.priceErrors ? '<div class="warn" style="margin-top:10px">Couldn’t fetch: ' + esc(priceErrorText(state.priceErrors)) + '. The last prices fetched successfully are used instead.</div>' : '') +
+      '<p class="muted" style="font-size:12px;margin-top:10px">Prices come from Yahoo Finance’s unofficial chart feed: best-effort, may break, for personal use.</p>' +
       '<div style="margin-top:14px"><button class="btn" data-act="refresh" type="button">' + icon('refresh') + '<span class="lbl">Refresh prices</span></button></div></div>';
     var pf = state.portfolio;
     h += '<div class="card pad"><div class="section-head"><h2>Portfolio sheet</h2></div>' +
@@ -857,10 +868,25 @@
     return h;
   }
 
-  function buildWelcome() {
+  function buildWelcome(state) {
+    if (state && state.transactions && state.transactions.length) {
+      return '<div class="welcome"><h2>Your files are loaded</h2>' +
+        '<p>The dashboard needs the S&amp;P 500 and your stocks’ price history before it can show anything. That download needs an internet connection and takes a few seconds the first time.</p>' +
+        '<p><button class="btn accent" data-act="refresh" type="button">' + icon('refresh') + '<span class="lbl">Download prices</span></button></p>' +
+        (state.priceErrors ? '<div class="warn">Last try: ' + esc(priceErrorText(state.priceErrors)) + '</div>' : '') + '</div>';
+    }
     return '<div class="welcome"><h2>See how your trading did <em>vs. the S&amp;P 500</em></h2>' +
-      '<p>Export your history from Fidelity (Accounts → History → Download) as CSV — one file per year works well — and drop the files below. Everything is computed on this computer; the only network use is fetching prices.</p>' +
-      '<div class="drop" id="dropZone" role="button" tabindex="0">' + icon('data') + '<h3>Drop Fidelity CSV files here</h3><p>or click to choose</p></div></div>';
+      '<p>Drop in your Fidelity history and see whether your buys and sells beat simply holding the S&amp;P 500. Everything is calculated on this computer. The internet is only used to fetch prices and headlines.</p>' +
+      '<div class="drop" id="dropZone" role="button" tabindex="0">' + icon('data') + '<h3>Drop Fidelity CSV files here</h3><p>or click to choose</p></div>' +
+      '<p style="margin-top:16px"><button class="btn" data-act="sample" type="button">Try sample data</button> <span class="muted" style="font-size:13px">Made-up account and prices. Nothing is saved.</span></p>' +
+      '<details class="more" style="margin-top:14px"><summary>Which file do I need?</summary><div class="more-body prose">' +
+      '<p>On Fidelity.com go to <strong>Accounts → History</strong>, pick a date range, and choose <strong>Download</strong>. That gives a CSV with Run Date, Action, Symbol, Quantity, Price and Amount columns. One file per year works well. Upload every year you have: a missing year shows up as a cash mismatch on the Data page.</p>' +
+      '<p>Keep Fidelity’s file names (<code>History_for_Account_…csv</code>). The account number in the name is how files are grouped into accounts.</p>' +
+      '<p>Other brokers aren’t supported yet.</p></div></details></div>';
+  }
+  function priceErrorText(pe) {
+    var e = (pe && pe.errors) || {};
+    return Object.keys(e).map(function (k) { return (k === 'all' ? '' : (k === '^SPX' || k === '^SP500TR' ? 'S&P 500 (' + k + ')' : k) + ': ') + e[k]; }).join(' · ');
   }
 
   var VIEWS = {
@@ -874,7 +900,7 @@
     if (typeof module === 'object' && module.exports) {
       module.exports = { setPrivate: setPrivate, fmtMoney: fmtMoney, fmtMoney2: fmtMoney2, fmtPct: fmtPct, fmtPp: fmtPp, fmtDate: fmtDate, esc: esc,
         mergeIndex: mergeIndex, buildOverview: buildOverview, buildYears: buildYears, buildPurchases: buildPurchases,
-        buildLotDetail: buildLotDetail, buildPortfolio: buildPortfolio, buildData: buildData, buildWelcome: buildWelcome,
+        buildLotDetail: buildLotDetail, buildPortfolio: buildPortfolio, buildData: buildData, buildWelcome: buildWelcome, glossary: glossary, priceErrorText: priceErrorText,
         filterLots: filterLots, sortLots: sortLots, verdictCounts: verdictCounts, DEFAULT_UI: DEFAULT_UI,
         pfAccounts: pfAccounts, pickPf: pickPf, buildNews: buildNews, buildOutlook: buildOutlook, buildModel: buildModel, buildDividends: buildDividends, TYPES: TYPES };
     }
@@ -882,9 +908,12 @@
   }
 
   // ------------------------------------------------------------ browser app
-  var state = { transactions: [], prices: {}, files: [], indexExtra: [], history: {}, trHistory: [],
-    live: false, liveAsOf: null, liveDate: null, lastRefresh: null, sp500: null, portfolio: null,
-    accounts: {}, account: null, ui: Object.assign({}, DEFAULT_UI) };
+  // Everything saved to the data file, with its empty value.
+  var SAVED = { transactions: [], prices: {}, files: [], indexExtra: [], history: {}, trHistory: [],
+    live: false, liveAsOf: null, liveDate: null, lastRefresh: null, priceErrors: null, portfolio: null,
+    accounts: {}, news: null, market: null, newsHistory: null, outlookModel: null };
+  function emptySaved() { return JSON.parse(JSON.stringify(SAVED)); }
+  var state = Object.assign(emptySaved(), { sp500: null, account: null, sample: false, ui: Object.assign({}, DEFAULT_UI) });
   var result = null, results = {}, dirty = true;
   function pref(k, v) {
     try { if (v === undefined) return JSON.parse(localStorage.getItem('tp.' + k)); localStorage.setItem('tp.' + k, JSON.stringify(v)); } catch (e) { return null; }
@@ -921,6 +950,7 @@
     if (!state.transactions.length) return;
     var groups = ensureAccounts();
     var bench = E.buildBenchmark(state.trHistory, mergeIndex(state.sp500, state.indexExtra));
+    if (bench.rows.length < 2) return; // no S&P 500 history yet: the welcome screen asks for a price download
     var index = new E.IndexSeries(bench.rows);
     Object.keys(groups).forEach(function (id) {
       var r = E.compute(groups[id], index, state.prices, { history: state.history, indexIsTotalReturn: bench.isTotalReturn });
@@ -945,7 +975,7 @@
     if (r.view === 'purchases' && r.view !== lastView) state.ui.year = r.arg || 'all';
     if (r.view === 'purchases' && r.arg) state.ui.year = r.arg;
     var title = VIEWS[r.view].title, sub = '', html;
-    if (!hasData && r.view !== 'portfolio' && r.view !== 'data') { html = buildWelcome(); title = 'Welcome'; }
+    if (!hasData && r.view !== 'portfolio' && r.view !== 'data') { html = buildWelcome(state); title = 'Welcome'; }
     else if (r.view === 'overview') { html = buildOverview(state, result); sub = acctName() + ' · ' + fmtDate(result.startDate) + ' – ' + fmtDate(result.endDate); }
     else if (r.view === 'years') {
       var y = r.arg && result.cohorts[r.arg] ? r.arg : 'all';
@@ -966,6 +996,8 @@
       var om = state.outlookModel;
       if ((!om || !om.built || Date.now() - Date.parse(om.built) > 7 * 864e5) && !state.modelStatus && !state.modelTried) { state.modelTried = true; setTimeout(buildOutlookModel, 80); }
     } else { html = buildData(state, result); sub = 'files, prices and checks'; }
+    if (state.sample) html = '<div class="sample-banner"><span><b>Sample data.</b> Made-up account, trades and prices (the S&amp;P 500 line too). Nothing is saved.</span>' +
+      '<button class="btn" data-act="leave-sample" type="button">Leave sample</button></div>' + html;
     $('viewTitle').textContent = title;
     $('viewSub').textContent = sub;
     var changed = r.view !== lastView;
@@ -1002,9 +1034,9 @@
   }
   function selectAccount(v) {
     v = String(v || '');
-    if (v.indexOf('sheet:') === 0) { state.ui.acct = v; pref('pfSheet', v); render(true); return; }
+    if (v.indexOf('sheet:') === 0) { state.ui.acct = v; if (!state.sample) pref('pfSheet', v); render(true); return; }
     if (v.indexOf('fid:') === 0) v = v.slice(4);
-    state.account = v; state.ui.acct = ''; pref('account', v); pref('pfSheet', ''); dirty = true; render();
+    state.account = v; state.ui.acct = ''; if (!state.sample) { pref('account', v); pref('pfSheet', ''); } dirty = true; render();
   }
   function renderNav(active) {
     var items = NAV.map(function (n) {
@@ -1109,7 +1141,7 @@
       b.onclick = function () { state.ui.symbol = b.getAttribute('data-stock'); state.ui.mode = 'cards'; render(true); };
     });
     viewEl.querySelectorAll('[data-act]').forEach(function (b) {
-      b.onclick = function () { var a = b.getAttribute('data-act'); if (a === 'refresh') refreshPrices(true); if (a === 'startover') startOver(); if (a === 'news') { fetchNews(); fetchMarket(); } if (a === 'model') buildOutlookModel(); };
+      b.onclick = function () { var a = b.getAttribute('data-act'); if (a === 'refresh') refreshPrices(true); if (a === 'startover') startOver(); if (a === 'news') { fetchNews(); fetchMarket(); } if (a === 'model') buildOutlookModel(); if (a === 'sample') loadSample(); if (a === 'leave-sample') leaveSample(); };
     });
     var dz = $('dropZone');
     if (dz) {
@@ -1219,14 +1251,25 @@
   }
 
   // ---- data ----
+  // Every call to the local server goes through here: JSON in and out (the
+  // server refuses anything else), and errors become readable messages.
+  function api(path, body) {
+    return fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) })
+      .catch(function () { throw new Error('can’t reach the local server — is it still running?'); })
+      .then(function (r) {
+        return r.json().catch(function () { return {}; }).then(function (j) {
+          if (!r.ok) throw new Error(j.error || 'the server answered ' + r.status);
+          return j;
+        });
+      });
+  }
   function saveData() {
-    return fetch('/api/save-data', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ transactions: state.transactions, prices: state.prices, files: state.files,
+    if (state.sample) return Promise.resolve(); // sample data is never saved over yours
+    return api('/api/save-data', { transactions: state.transactions, prices: state.prices, files: state.files,
         indexExtra: state.indexExtra, history: state.history, trHistory: state.trHistory,
-        live: state.live, liveAsOf: state.liveAsOf, liveDate: state.liveDate, lastRefresh: state.lastRefresh,
+        live: state.live, liveAsOf: state.liveAsOf, liveDate: state.liveDate, lastRefresh: state.lastRefresh, priceErrors: state.priceErrors,
         portfolio: state.portfolio, accounts: state.accounts, news: state.news, market: state.market, newsHistory: state.newsHistory, outlookModel: state.outlookModel })
-    }).catch(function () { toast('Could not save — is the server running?', true); });
+      .catch(function (e) { toast('Could not save (' + e.message + ').', true); });
   }
   function allSymbols() {
     var set = {};
@@ -1254,14 +1297,12 @@
     viewEl.querySelectorAll('[data-act="refresh"]').forEach(function (b) { b.classList.toggle('spinning', on); b.disabled = on; });
   }
   function refreshPrices(showToast) {
+    if (state.sample) { if (showToast) toast('Sample data uses made-up prices, so refresh is off. Leave the sample to use your own files.'); return Promise.resolve(); }
     if (refreshing || !state.transactions.length) return Promise.resolve();
     var symbols = allSymbols(), since = refreshSince(symbols);
     setRefreshing(true);
     if (showToast && since === firstDate()) toast('Downloading daily history for ' + symbols.length + ' symbols — a few seconds the first time…');
-    return fetch('/api/refresh-prices', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ symbols: symbols, since: since })
-    }).then(function (r) { return r.json(); }).then(function (res) {
+    return api('/api/refresh-prices', { symbols: symbols, since: since }).then(function (res) {
       var n = 0;
       Object.keys(res.prices || {}).forEach(function (s) { if (s !== '^SPX') { state.prices[s] = res.prices[s]; n++; } });
       if (!n && !(res.trHistory || []).length && !(res.indexHistory || []).length) {
@@ -1276,11 +1317,13 @@
       state.lastRefresh = new Date().toLocaleString();
       dirty = true;
       var errs = Object.keys(res.errors || {});
+      state.priceErrors = errs.length ? { at: state.lastRefresh, errors: res.errors } : null;
       if (showToast) toast((res.live ? 'Live prices · ' + (state.liveAsOf || '') : 'Prices updated to ' + fmtDate(state.liveDate)) +
-        (errs.length ? ' · could not fetch ' + errs.join(', ') : ''), errs.length > 0 && !n);
+        (errs.length ? ' · could not fetch ' + errs.map(function (s) { return s === '^SPX' || s === '^SP500TR' ? 'the S&P 500 (' + s + ')' : s; }).join(', ') + ' — last known prices kept; details on Data' : ''), errs.length > 0 && !n);
       return saveData();
     }).catch(function (e) {
-      if (showToast) toast('Price refresh failed (' + e.message + '). Showing last known prices.', true);
+      state.priceErrors = { at: new Date().toLocaleString(), errors: { all: e.message } };
+      if (showToast) toast('Price refresh failed (' + e.message + '). Showing the last prices saved.', true);
     }).then(function () { setRefreshing(false); render(true); });
   }
 
@@ -1288,9 +1331,7 @@
     if (state.newsLoading || !result) return;
     state.newsLoading = true;
     viewEl.querySelectorAll('[data-act="news"]').forEach(function (b) { b.classList.add('spinning'); b.disabled = true; });
-    fetch('/api/news', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ symbols: Object.keys(result.holdings || {}) }) })
-      .then(function (r) { return r.json(); })
+    api('/api/news', { symbols: state.sample ? [] : Object.keys(result.holdings || {}) })
       .then(function (res) {
         var n = Object.keys(res.symbols || {}).reduce(function (s, k) { return s + res.symbols[k].items.length; }, 0) + ((res.market || {}).items || []).length;
         if (!n) throw new Error('no headlines came back — check the internet connection');
@@ -1312,7 +1353,7 @@
     if (state.modelStatus) return;
     function status(t) { state.modelStatus = t; if (route().view === 'news') render(true); }
     status('Downloading about 70 years of economic and market history…');
-    fetch('/api/outlook-data', { method: 'POST' }).then(function (r) { return r.json(); }).then(function (d) {
+    api('/api/outlook-data').then(function (d) {
       if (!d.series || !d.series.SPX) throw new Error('the S&P 500 history didn’t download — check the internet connection');
       status('Training and testing the model on ' + Object.keys(d.series).length + ' data series…');
       return new Promise(function (resolve, reject) {
@@ -1331,13 +1372,14 @@
   function fetchMarket() {
     if (state.marketLoading) return;
     state.marketLoading = true;
-    fetch('/api/market', { method: 'POST' }).then(function (r) { return r.json(); }).then(function (res) {
+    api('/api/market').then(function (res) {
       var errs = Object.keys(res.errors || {});
       if (res.macro || res.fearGreed) {
         state.market = Object.assign({}, state.market || {}, res.macro ? { macro: res.macro } : {}, res.fearGreed ? { fearGreed: res.fearGreed } : {}, { fetchedAt: res.fetchedAt });
         saveData();
       }
-      if (errs.length) toast('Could not load ' + errs.map(function (e) { return e === 'macro' ? 'economy data (FRED)' : 'Fear & Greed (CNN)'; }).join(' or ') + '.', true);
+      if (errs.length) toast('Could not load ' + errs.map(function (e) { return (e === 'macro' ? 'economy data (FRED)' : 'Fear & Greed (CNN)') + ': ' + res.errors[e]; }).join('; ') +
+        (state.market ? '. Showing the last copy saved.' : '.'), true);
     }).catch(function (e) { toast('Could not load market data (' + e.message + ').', true); })
       .then(function () { state.marketLoading = false; if (route().view === 'news') render(true); });
   }
@@ -1345,6 +1387,7 @@
   function handleFiles(list) {
     var files = Array.prototype.slice.call(list || []);
     if (!files.length) return;
+    if (state.sample) { leaveSample(true).then(function () { handleFiles(files); }); return; }
     Promise.all(files.map(function (f) { return f.text().then(function (t) { return { name: f.name, text: t }; }); })).then(function (cs) {
       var added = 0, fid = 0, sheet = null, errors = [];
       cs.forEach(function (c) {
@@ -1373,9 +1416,42 @@
     }).catch(function (e) { toast('Could not read the files: ' + e.message, true); });
   }
 
+  // Restore what the server has saved (used at start and when leaving the sample).
+  function loadSaved() {
+    return fetch('/api/load-data').then(function (r) { return r.ok ? r.json() : null; }).catch(function () { return null; }).then(function (s) {
+      var fresh = emptySaved();
+      s = s || {};
+      Object.keys(fresh).forEach(function (k) { state[k] = s[k] !== undefined && s[k] !== null ? s[k] : fresh[k]; });
+      dirty = true;
+    });
+  }
+  // Sample mode: a made-up account (sample/sample-data.json, built by
+  // tools/make-sample.js) loaded into memory only. saveData() and price
+  // refresh are off, so your saved data is never touched.
+  function loadSample() {
+    fetch('sample/sample-data.json').then(function (r) { if (!r.ok) throw new Error('sample file missing'); return r.json(); }).then(function (d) {
+      var tx = [];
+      d.files.forEach(function (f) { tx = E.mergeTransactions(tx, E.assignOccurrenceKeys(E.parseFidelityCSV(f.csv, f.name).rows)).merged; });
+      var sheet = P.parseSheet(d.sheet.csv);
+      sheet.source = d.sheet.name;
+      Object.assign(state, emptySaved(), { sample: true, transactions: tx, files: d.files.map(function (f) { return f.name; }), history: d.history,
+        prices: d.prices, trHistory: d.trHistory, indexExtra: d.indexExtra, portfolio: sheet, accounts: d.accounts, lastRefresh: 'sample data' });
+      state.account = null; state.ui = Object.assign({}, DEFAULT_UI); state.newsTried = state.marketTried = state.modelTried = false;
+      dirty = true; location.hash = '#/overview'; render();
+      toast('Sample data loaded. Try every tab; nothing you do here is saved.');
+    }).catch(function (e) { toast('Could not load the sample (' + e.message + ').', true); });
+  }
+  function leaveSample(quiet) {
+    state.sample = false; state.news = null; state.account = pref('account'); state.ui = Object.assign({}, DEFAULT_UI, { acct: pref('pfSheet') || '' });
+    state.newsTried = state.marketTried = state.modelTried = false;
+    return loadSaved().then(function () {
+      if (!quiet) { location.hash = '#/overview'; render(); toast('Back to your own data.'); }
+    });
+  }
   function startOver() {
+    if (state.sample) { leaveSample(); return; }
     if (!window.confirm('Start over? This deletes your saved transactions, prices and portfolio sheet from this computer. Your CSV files are untouched.')) return;
-    fetch('/api/clear-data', { method: 'POST' }).then(function () {
+    api('/api/clear-data').then(function () {
       state.transactions = []; state.prices = {}; state.files = []; state.indexExtra = []; state.history = {}; state.trHistory = [];
       state.live = false; state.lastRefresh = null; state.portfolio = null; state.accounts = {}; state.ui.acct = ''; dirty = true;
     }).then(function () { toast('Cleared.'); location.hash = '#/data'; render(); });
@@ -1421,23 +1497,17 @@
   function init() {
     initChrome();
     Promise.all([
-      fetch('sp500.json').then(function (r) { return r.json(); }),
       fetch('regime-table.json').then(function (r) { return r.ok ? r.json() : null; }).catch(function () { return null; }),
-      fetch('/api/load-data').then(function (r) { return r.json(); }).catch(function () { return null; })
+      loadSaved()
     ]).then(function (res) {
-      state.sp500 = res[0];
-      state.regimeTable = res[1];
-      var s = res[2] || {};
-      ['transactions', 'prices', 'files', 'indexExtra', 'history', 'trHistory', 'live', 'liveAsOf', 'liveDate', 'lastRefresh', 'portfolio', 'accounts', 'news', 'market', 'newsHistory', 'outlookModel'].forEach(function (k) {
-        if (s[k] !== undefined && s[k] !== null) state[k] = s[k];
-      });
+      state.regimeTable = res[0];
     }).then(function () {
       dirty = true;
       render();
       // Stale prices on open? Refresh quietly in the background.
       if (state.transactions.length && (!state.trHistory.length || !Object.keys(state.history).length)) refreshPrices(false);
     }).catch(function (err) {
-      viewEl.innerHTML = '<div class="welcome"><h2>Could not start</h2><p>' + esc(err.message) + '</p><p>Make sure the server is running (Start.command, or <code>python3 server.py</code> in this folder) and reload.</p></div>';
+      viewEl.innerHTML = '<div class="welcome"><h2>Could not start</h2><p>' + esc(err.message) + '</p><p>Make sure the server is running (Start.command on a Mac, start.bat on Windows, or <code>python3 server.py</code> in the app folder) and reload.</p></div>';
     });
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();

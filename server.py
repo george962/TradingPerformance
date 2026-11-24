@@ -7,7 +7,12 @@ symbols, the S&P 500 total-return index (^SP500TR) and the price index (^GSPC). 
 All computation runs in the browser; this server is thin: serve, persist,
 fetch prices.
 
-Usage: double-click Start.command, or run `python3 server.py` in this folder.
+Usage: double-click Start.command (macOS) or start.bat (Windows), or run
+`python3 server.py` in this folder.
+
+Security: binds to 127.0.0.1 only; serves an allowlist of app files; API
+calls must come from this page (Host and Origin checked) so other websites
+you visit cannot read or change your data.
 """
 import gzip
 import html
@@ -18,6 +23,8 @@ import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor
 from email.utils import parsedate_to_datetime
 import os
+import shutil
+import socket
 import sys
 import threading
 import time
@@ -29,8 +36,39 @@ from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-DATA_FILE = os.path.join(HERE, "data.json")
+APP_NAME = "TradingPerformance"
+
+
+def user_data_dir():
+    """Where your data lives — outside the app folder, so the app folder can
+    be updated or deleted safely. TP_DATA_DIR overrides it."""
+    env = os.environ.get("TP_DATA_DIR")
+    if env:
+        return os.path.abspath(os.path.expanduser(env))
+    home = os.path.expanduser("~")
+    if sys.platform == "darwin":
+        base = os.path.join(home, "Library", "Application Support")
+    elif os.name == "nt":
+        base = os.environ.get("APPDATA") or os.path.join(home, "AppData", "Roaming")
+    else:
+        base = os.environ.get("XDG_DATA_HOME") or os.path.join(home, ".local", "share")
+    return os.path.join(base, APP_NAME)
+
+
+DATA_DIR = user_data_dir()
+DATA_FILE = os.path.join(DATA_DIR, "data.json")
+LEGACY_DATA_FILE = os.path.join(HERE, "data.json")  # where v1.14 and earlier kept it
 DEFAULT_PORT = 8765
+MAX_BODY = 32 * 1024 * 1024  # largest request body accepted (saved data is ~1 MB)
+# The only files the server hands out. Everything else (server.py, tests,
+# .git, your data) is 404.
+STATIC_FILES = {
+    "/index.html", "/app.js", "/charts.js", "/economy.js", "/engine.js", "/news.js",
+    "/outlook-model.js", "/outlook-worker.js", "/portfolio.js", "/styles.css",
+    "/regime-table.json", "/sample/sample-data.json",
+}
+CONTENT_TYPES = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8",
+                 ".css": "text/css; charset=utf-8", ".json": "application/json"}
 USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
 TIMEOUT = 15
 
@@ -58,11 +96,51 @@ def load_data():
                 "lastRefresh": None}
 
 
+def ensure_data_dir():
+    os.makedirs(DATA_DIR, exist_ok=True)
+    if os.name != "nt":
+        try:
+            os.chmod(DATA_DIR, 0o700)  # your data: readable by you only
+        except OSError:
+            pass
+
+
 def save_data(data):
+    ensure_data_dir()
     tmp = DATA_FILE + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
         json.dump(data, f)
     os.replace(tmp, DATA_FILE)
+
+
+def migrate_legacy_data():
+    """Move data.json out of the app folder (where older versions kept it)."""
+    if os.path.exists(LEGACY_DATA_FILE) and not os.path.exists(DATA_FILE):
+        ensure_data_dir()
+        shutil.move(LEGACY_DATA_FILE, DATA_FILE)
+        log("moved data.json from the app folder to %s" % DATA_DIR)
+
+
+def friendly_error(exc):
+    """A short, readable reason for a failed download."""
+    if isinstance(exc, urllib.error.HTTPError):
+        if exc.code == 404:
+            return "not found at the data source (check the symbol)"
+        if exc.code == 429:
+            return "the data source is limiting requests; try again in a minute"
+        if exc.code in (401, 403):
+            return "the data source refused the request (its feed may have changed)"
+        return "the data source returned an error (HTTP %d)" % exc.code
+    if isinstance(exc, (socket.timeout, TimeoutError)):
+        return "timed out"
+    if isinstance(exc, urllib.error.URLError):
+        if "timed out" in str(exc.reason):
+            return "timed out"
+        return "no internet connection, or the data source is unreachable"
+    if isinstance(exc, (ValueError, KeyError)):
+        return "no usable data came back (%s)" % str(exc)[:80]
+    return str(exc)[:120]
 
 
 def _date_to_epoch(d):
@@ -163,12 +241,12 @@ def refresh_prices(symbols, since=None):
         as_of = info["time"]
         prices["^SPX"] = {"price": rows[-1][1], "date": rows[-1][0]}
     except Exception as exc:
-        errors["^SPX"] = str(exc)
+        errors["^SPX"] = friendly_error(exc)
     try:
         rows, _ = fetch_yahoo_history("^SP500TR", since, "3mo")
         tr_history = [[d, c] for d, c in rows]
     except Exception as exc:
-        errors["^SP500TR"] = str(exc)
+        errors["^SP500TR"] = friendly_error(exc)
     for sym in symbols:
         upper = sym.upper()
         if upper in ("^SPX", "^GSPC", "SPX", "^SP500TR"):
@@ -178,7 +256,7 @@ def refresh_prices(symbols, since=None):
             history[upper] = [[d, c] for d, c in rows]
             prices[upper] = {"price": rows[-1][1], "date": rows[-1][0], "live": info["live"]}
         except Exception as exc:
-            errors[upper] = str(exc)
+            errors[upper] = friendly_error(exc)
     return {"prices": prices, "history": history, "indexHistory": index_history,
             "trHistory": tr_history, "live": live, "asOf": as_of, "errors": errors}
 
@@ -334,7 +412,7 @@ def fetch_macro():
     out = {}
     for sid in MACRO_SERIES:
         raw = http_get("https://fred.stlouisfed.org/graph/fredgraph.csv?id=%s&cosd=%s" % (sid, start),
-                       headers={"User-Agent": "TradingPerformance-local/1.14"}).decode("utf-8", "replace")
+                       headers={"User-Agent": "TradingPerformance-local"}).decode("utf-8", "replace")
         rows = []
         for line in raw.strip().splitlines()[1:]:
             parts = line.split(",")
@@ -371,11 +449,11 @@ def fetch_market_data():
     try:
         out["macro"] = fetch_macro()
     except Exception as exc:
-        errors["macro"] = str(exc)
+        errors["macro"] = friendly_error(exc)
     try:
         out["fearGreed"] = fetch_fear_greed()
     except Exception as exc:
-        errors["fearGreed"] = str(exc)
+        errors["fearGreed"] = friendly_error(exc)
     out["errors"] = errors
     return out
 
@@ -384,8 +462,8 @@ def fetch_market_data():
 # Long histories for the outlook model: FRED (free, no key), the S&P 500
 # and four other countries' indexes since their start (Yahoo), and the
 # Shiller CAPE (Robert Shiller's data via the datasets/s-and-p-500 GitHub
-# mirror). Cached in outlook-data/ for a day.
-OUTLOOK_DIR = os.path.join(HERE, "outlook-data")
+# mirror). Downloaded on first use and cached in the data folder for a day.
+OUTLOOK_DIR = os.path.join(DATA_DIR, "outlook-data")
 OUTLOOK_FRED = ["SAHMREALTIME", "GS10", "TB3MS", "BAA", "USREC", "ICSA", "INDPRO", "PERMIT", "USALOLITONOSTSAM",
                 "OECDLOLITONOSTSAM", "WTISPLC", "DTWEXBGS", "USEPUINDXM", "UMCSENT", "VIXCLS", "NFCI", "CPIAUCSL", "FEDFUNDS"]
 OUTLOOK_MARKETS = {"UK (FTSE 100)": "^FTSE", "Japan (Nikkei 225)": "^N225", "Germany (DAX)": "^GDAXI", "Canada (TSX)": "^GSPTSE"}
@@ -412,7 +490,7 @@ def _cached(name, fetch, ttl=86400):
 
 def _fred_full(sid):
     raw = http_get("https://fred.stlouisfed.org/graph/fredgraph.csv?id=%s" % sid,
-                   headers={"User-Agent": "TradingPerformance-local/1.14"}).decode("utf-8", "replace")
+                   headers={"User-Agent": "TradingPerformance-local"}).decode("utf-8", "replace")
     rows = []
     for line in raw.strip().splitlines()[1:]:
         parts = line.split(",")
@@ -455,12 +533,12 @@ def fetch_outlook_data():
             try:
                 out[name] = f.result()
             except Exception as exc:
-                errors[name] = str(exc)[:120]
+                errors[name] = friendly_error(exc)
         for f, label in mfuts.items():
             try:
                 markets[label] = f.result()
             except Exception as exc:
-                errors[label] = str(exc)[:120]
+                errors[label] = friendly_error(exc)
     return {"series": out, "markets": markets, "errors": errors, "fetchedAt": datetime.now(timezone.utc).isoformat()}
 
 
@@ -471,28 +549,102 @@ class Handler(BaseHTTPRequestHandler):
         pass  # keep stdout clean; we log what matters ourselves
 
     # -- helpers ---------------------------------------------------------
+    def _common_headers(self):
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("X-Frame-Options", "DENY")
+        self.send_header("Referrer-Policy", "no-referrer")
+
     def _send_json(self, obj, status=200):
         body = json.dumps(obj).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        if self.close_connection:
+            self.send_header("Connection", "close")
+        self._common_headers()
         self.end_headers()
         self.wfile.write(body)
 
     def _read_json(self):
-        length = int(self.headers.get("Content-Length") or 0)
-        if length <= 0:
+        """Parsed JSON body (read once in do_POST). Raises ValueError on a bad
+        body (caller sends 400)."""
+        raw = getattr(self, "_body", b"")
+        if not raw:
             return {}
-        raw = self.rfile.read(length)
-        try:
-            return json.loads(raw.decode("utf-8"))
-        except Exception:
-            return {}
+        body = json.loads(raw.decode("utf-8"))
+        if not isinstance(body, dict):
+            raise ValueError("expected a JSON object")
+        return body
+
+    def _host_ok(self):
+        """Blocks DNS-rebinding: the browser must be talking to 127.0.0.1 or
+        localhost on our port, not to some other name that resolves here."""
+        port = self.server.server_address[1]
+        host = (self.headers.get("Host") or "").strip().lower()
+        return host in ("127.0.0.1:%d" % port, "localhost:%d" % port)
+
+    def _api_refusal(self):
+        """Why an API call must be refused, or None. Other websites open in
+        your browser can send requests to 127.0.0.1 — this turns them away."""
+        port = self.server.server_address[1]
+        origin = self.headers.get("Origin")
+        if origin is not None and origin not in ("http://127.0.0.1:%d" % port, "http://localhost:%d" % port):
+            return 403, "requests from other websites are not allowed"
+        site = self.headers.get("Sec-Fetch-Site")
+        if site and site not in ("same-origin", "none"):
+            return 403, "requests from other websites are not allowed"
+        if self.command == "POST":
+            ctype = (self.headers.get("Content-Type") or "").split(";")[0].strip().lower()
+            if ctype != "application/json":
+                return 415, "API calls must send Content-Type: application/json"
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+            except ValueError:
+                return 400, "bad Content-Length"
+            if length > MAX_BODY:
+                return 413, "request body too large"
+        return None
+
+    def _guard(self, is_api):
+        refusal = (403, "unexpected Host header") if not self._host_ok() else (self._api_refusal() if is_api else None)
+        if refusal:
+            # The body (if any) is left unread, so this connection can't be
+            # reused: close it, or the leftover bytes would corrupt the next request.
+            self.close_connection = True
+            self._send_json({"error": refusal[1]}, status=refusal[0])
+            return False
+        return True
 
     # -- routing ---------------------------------------------------------
     def do_GET(self):
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path
+        if not self._guard(path.startswith("/api/")):
+            return
+        try:
+            self._get(path)
+        except Exception as exc:  # never leave the browser hanging
+            log("ERROR on GET %s: %s" % (path, exc))
+            self._send_json({"error": "server error: %s" % str(exc)[:120]}, status=500)
+
+    def do_POST(self):
+        path = urllib.parse.urlparse(self.path).path
+        if not self._guard(True):
+            return
+        # Always consume the whole body, even for endpoints that ignore it:
+        # on a kept-alive connection unread bytes would become the start of
+        # the next request.
+        self._body = self.rfile.read(int(self.headers.get("Content-Length") or 0))
+        try:
+            self._post(path)
+        except ValueError as exc:
+            self._send_json({"error": "bad request body (%s)" % str(exc)[:80]}, status=400)
+        except Exception as exc:
+            log("ERROR on POST %s: %s" % (path, exc))
+            self._send_json({"error": "server error: %s" % str(exc)[:120]}, status=500)
+
+    def _get(self, path):
         if path == "/api/status":
             data = load_data()
             price_dates = [p.get("date") for p in data["prices"].values() if p.get("date")]
@@ -508,11 +660,12 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/load-data":
             self._send_json(load_data())
             return
+        if path.startswith("/api/"):
+            self._send_json({"error": "unknown endpoint"}, status=404)
+            return
         self._serve_static(path)
 
-    def do_POST(self):
-        parsed = urllib.parse.urlparse(self.path)
-        path = parsed.path
+    def _post(self, path):
         if path == "/api/save-data":
             body = self._read_json()
             # v1.14: keep every field the app saves (price history, the
@@ -520,18 +673,18 @@ class Handler(BaseHTTPRequestHandler):
             # and earlier kept only the first five, so the downloaded history
             # was dropped on every reload.
             keys = ("transactions", "prices", "files", "indexExtra", "lastRefresh",
-                    "history", "trHistory", "live", "liveAsOf", "liveDate",
+                    "history", "trHistory", "live", "liveAsOf", "liveDate", "priceErrors",
                     "portfolio", "fileMeta", "accounts", "news", "market", "newsHistory", "outlookModel")
             data = {k: body.get(k) for k in keys if k in body}
             save_data(data)
-            log("saved data.json (%d transactions, %d files)"
+            log("saved your data (%d transactions, %d files)"
                 % (len(data.get("transactions") or []), len(data.get("files") or [])))
             self._send_json({"ok": True})
             return
         if path == "/api/clear-data":
             if os.path.exists(DATA_FILE):
                 os.remove(DATA_FILE)
-            log("cleared data.json")
+            log("cleared your saved data")
             self._send_json({"ok": True})
             return
         if path == "/api/outlook-data":
@@ -569,16 +722,13 @@ class Handler(BaseHTTPRequestHandler):
     def _serve_static(self, path):
         if path in ("/", ""):
             path = "/index.html"
-        # Prevent path traversal: stay inside HERE.
-        rel = urllib.parse.unquote(path.lstrip("/"))
-        full = os.path.normpath(os.path.join(HERE, rel))
-        if not full.startswith(HERE):
-            self.send_error(403)
-            return
-        if not os.path.isfile(full):
+        # Allowlist only: no path from the URL is ever joined onto the disk
+        # path, so nothing outside these files can be reached.
+        if path not in STATIC_FILES:
             self.send_error(404)
             return
-        ctype, _ = mimetypes.guess_type(full)
+        full = os.path.join(HERE, *path.lstrip("/").split("/"))
+        ctype = CONTENT_TYPES.get(os.path.splitext(full)[1]) or mimetypes.guess_type(full)[0]
         try:
             with open(full, "rb") as f:
                 body = f.read()
@@ -591,11 +741,16 @@ class Handler(BaseHTTPRequestHandler):
         # Never cache the app files: after a folder update the browser must
         # load the new code on a plain reload, not a stale cached copy.
         self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
+        self._common_headers()
         self.end_headers()
         self.wfile.write(body)
 
 
 def main():
+    try:
+        migrate_legacy_data()
+    except OSError as exc:
+        log("WARNING: could not move the old data.json (%s); it stays in the app folder" % exc)
     port = DEFAULT_PORT
     try:
         server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
@@ -605,7 +760,7 @@ def main():
     url = "http://127.0.0.1:%d/" % port
     log("Trading Performance vs S&P 500")
     log("Serving %s" % url)
-    log("Data file: %s" % DATA_FILE)
+    log("Your data: %s" % DATA_FILE)
     log("Press Ctrl-C to stop.")
     threading.Timer(0.6, lambda: webbrowser.open(url)).start()
     try:

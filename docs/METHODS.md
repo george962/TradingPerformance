@@ -2,6 +2,28 @@
 
 All returns are pre-tax and return-only. They are not risk-adjusted.
 
+## Terms used
+
+- **Money in:** money you added from outside (contributions, rollovers,
+  transfers, Roth conversions). Dividends and interest are *returns*, not
+  money in.
+- **Time-weighted return (TWR):** your return with the timing and size of
+  deposits taken out, so a big deposit doesn't count as a gain.
+- **pp (percentage points):** the gap between two percentages. You +12%,
+  S&P +10% means +2 pp.
+- **Buy-and-hold:** the same deposits, each put into the S&P 500
+  total-return index on the day it arrived.
+- **Beat / in line / lagged:** more than 0.5 pp ahead, within ±0.5 pp, or
+  more than 0.5 pp behind the index over the same dates.
+
+Your data is saved in `data.json` in your user data folder (see the
+README), never in the app folder. Delete it, or use **Data → Start over**,
+to wipe everything.
+
+Prices (Yahoo Finance), headlines (Yahoo, Google News) and Fear & Greed
+(CNN) come from unofficial feeds that may break. Economy data comes from
+FRED. Details and terms are in [DATA_SOURCES.md](../DATA_SOURCES.md).
+
 ## Rebuilding the account
 
 - The account is rebuilt **day by day** from the Fidelity rows: shares per
@@ -152,6 +174,11 @@ by month since 1975 using only earlier data, these odds warned of further
 10% drops better than the long-run average and were only slightly better
 at calling up or down. They are odds from history, not a forecast.
 
+To rebuild the table with the latest data, run
+`python3 tools/fetch-regime-data.py`, then `node tools/regime-backtest.js`.
+The script uses the same `marketRegime` rules from `economy.js` that the app
+runs.
+
 ### The tested model ("Does more data help?")
 
 This checks whether **more** inputs make better predictions. An input is
@@ -168,7 +195,8 @@ kept only if it helps on years the model never saw.
   drop within 3 months; a US recession within 12 months.
 - **Data:** about 70 years, downloaded on first use from FRED, Yahoo
   Finance (S&P 500 plus UK, Japan, Germany and Canada indexes) and Robert
-  Shiller's CAPE data, then cached in `outlook-data/` for a day. Economic
+  Shiller's CAPE data, then cached in `outlook-data/` in your data folder
+  for a day. Economic
   data is lagged 1–2 months to when it was actually published.
 - **Testing:** logistic regression, refit every year on earlier months only.
   Inputs are chosen on 1975–1999 (added only if they improve the accuracy
