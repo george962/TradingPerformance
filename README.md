@@ -19,15 +19,34 @@ used to fetch public prices and headlines.
 
 ## Start
 
-1. Download this repo and unzip it.
-2. Start it:
-   - **Mac:** double-click `Start.command`
-   - **Windows:** double-click `start.bat`
-   - **Any OS:** run `python3 server.py` in this folder
-3. Your browser opens the app. Drop in your Fidelity files, or click
-   **Try sample data** to look around with a made-up account first.
+You only need to do steps 1 and 2 once.
 
-You need Python 3. Nothing else to install.
+**1. Install Python 3 (free).** If you're not sure you have it, download it
+from [python.org/downloads](https://www.python.org/downloads/) and install it.
+On Windows, tick **"Add python.exe to PATH"** on the first screen of the
+installer.
+
+**2. Download the app.** At the top of this page, click the green **Code**
+button, then **Download ZIP**. Open your Downloads folder and double-click the
+ZIP to unzip it. You get a folder named `TradingPerformance-main`.
+
+**3. Start it.** Open that folder, then:
+
+- **Mac:** double-click `Start.command`. If your Mac refuses to open it,
+  right-click the file, choose **Open**, then **Open** again.
+- **Windows:** double-click `start.bat`. If a blue "Windows protected your PC"
+  box appears, click **More info**, then **Run anyway**.
+- **Linux, or if the above doesn't work:** open a terminal in the folder and
+  run `python3 server.py`.
+
+A black window opens and your web browser shows the app. The address starts
+with `127.0.0.1`, which means it is running on your own computer. **Keep the
+black window open while you use the app.** Close it to stop the app. Next time,
+double-click the same file again.
+
+**4. Look around.** Click **Try sample data** to see the app with a made-up
+account (nothing is saved). To use your own trades, drop in your Fidelity
+files. See [Get your Fidelity files](#get-your-fidelity-files) below.
 
 Your data is saved in your user folder, not in the app folder, so you can
 update or delete the app safely:
